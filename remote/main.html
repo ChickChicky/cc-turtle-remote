@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+
+<html>
+
+    <head>
+
+        <script>
+
+            var scene;
+            var ttl = {};
+            var knownBlocks = [];
+            function addKnownBlock(pos,color=0xaaaaaa) {
+                if (knownBlocks.findIndex((v)=>v.pos==pos)==-1) {
+                    const cube = new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial({color,fog:true,wireframe:true}));
+                    cube.position.set(pos.x,pos.y,pos.z);
+                    scene.add(cube);
+                    knownBlocks.push({pos,cube});
+                }
+            }
+            function removeKnownBlock(pos) {
+                knownBlocks = knownBlocks.filter((v)=>v.pos!=pos);
+            }
+            var ws = new WebSocket('ws://localhost:8080','remote');
+            var turtleName = new URLSearchParams(window.location.search).get('id');
+
+            let cancel = false;
+
+            if (!new URLSearchParams(window.location.search).get('id')) {
+                cancel = true;
+            }
+        
+            function main() {
+           
+                new Promise((resolve)=>{
+                    let loop = setInterval(()=>{
+                        if (ws.readyState==WebSocket.OPEN) {
+                            clearInterval(loop);
+                            resolve('ok');
+                        } else
+                        if (ws.readyState==WebSocket.CLOSED) {
+                            clearInterval(loop);
+                            resolve('bad');
+                        }
+                    },10);
+                }).then(async (state)=>{
+                    if (state == 'ok' && !cancel) {
+                        document.body.querySelector('#connection').innerHTML = 'connected to '+turtleName;
+                        document.body.innerHTML += document.querySelector('#page').innerHTML;
+                        ws.send(JSON.stringify({type:'attachTurtle',turtle:turtleName}));
+                        ws.onmessage = function(ev) {
+                            let data = JSON.parse(ev.data);
+                            ttl = data;
+
+                            // console.log(ttl);
+
+                            if (data.type == 'turtleStatusUpdate') {
+                                document.querySelector('#topBlock').innerHTML = data.topBlock.name;
+                                document.querySelector('#frontBlock').innerHTML = data.frontBlock.name;
+                                document.querySelector('#bottomBlock').innerHTML = data.bottomBlock.name;
+                                document.querySelector('#turtlePos').innerHTML = `x:${data.x} y:${data.y} z:${data.z}`;
+                            }
+
+                            let frontPos = {
+                                x: ttl.x + (((ttl.dir==1)||(ttl.dir==3))?((ttl.dir==1)?+1:-1):0),
+                                y: ttl.y,
+                                z: ttl.z + (((ttl.dir==0)||(ttl.dir==2))?((ttl.dir==2)?+1:-1):0)
+                            }
+                            let bottomPos = {
+                                x: ttl.x,
+                                y: ttl.y-1,
+                                z: ttl.z
+                            }
+                            let topPos = {
+                                x: ttl.x,
+                                y: ttl.y+1,
+                                z: ttl.z
+                            }
+
+                            if (ttl.topBlock.name != 'minecraft:air') {
+                                addKnownBlock(topPos);
+                            } else {
+                                removeKnownBlock(topPos);
+                            }
+
+                            if (ttl.bottomBlock.name != 'minecraft:air') {
+                                addKnownBlock(bottomPos);
+                            } else {
+                                removeKnownBlock(bottomPos);
+                            }
+
+                            if (ttl.frontBlock.name != 'minecraft:air') {
+                                addKnownBlock(frontPos);
+                            } else {
+                                removeKnownBlock(frontPos);
+                            }
+
+                        }
+                        allGood();
+                    } else if ( state == 'bad' ) {
+                        document.body.querySelector('#connection').innerHTML = 'cannot establish connection';
+                    } else {
+                        document.body.querySelector('#connection').innerHTML = 'please provide the ID of the turtle to connect to in the URL, e.g. <pre>https://localhost:8080?id=1</pre>';
+                    }
+                });
+            }
+        </script>
+        
+    </head>
+
+    <body onload="main()">
+        <label id='connection'>connecting...</label><br>
+        
+        <!-- code -->
+        <script type='application/javascript'>
+            function forward() { ws.send(JSON.stringify({type:'eval',func:'turtle.forward()'})) };
+            function left() { ws.send(JSON.stringify({type:'eval',func:'turtle.turnLeft()'})) };
+            function right() { ws.send(JSON.stringify({type:'eval',func:'turtle.turnRight()'})) };
+            function up() { ws.send(JSON.stringify({type:'eval',func:'turtle.up()'})) };
+            function down() { ws.send(JSON.stringify({type:'eval',func:'turtle.down()'})) };
+
+            function digUp() { ws.send(JSON.stringify({type:'eval',func:'turtle.digUp()'})) };
+            function digForward() { ws.send(JSON.stringify({type:'eval',func:'turtle.dig()'})) };
+            function digDown() { ws.send(JSON.stringify({type:'eval',func:'turtle.digDown()'})) };
+
+            function sendInputCommand() { ws.send(JSON.stringify({type:'eval',func:document.querySelector('#commandArea').value})) };
+        </script>
+
+        <script> function allGood() {
+            scene = new THREE.Scene();
+			const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+            scene.fog = new THREE.Fog();
+
+			const renderer = new THREE.WebGLRenderer();
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			document.body.appendChild( renderer.domElement );
+
+			const geometry = new THREE.BoxGeometry();
+			const material = new THREE.MeshBasicMaterial( { color: 0x00ff00 } );
+            /*
+			const cube = new THREE.Mesh( geometry, material );
+            cube.position.set(0,-1,0)
+			scene.add( cube );
+            */
+            addKnownBlock({x:0,y:-1,z:0},0x00ff00);
+
+            const ttlCube = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial( { color: 0xf0f000 } ));
+            ttlCube.scale.set(.5,.5,.5);
+            scene.add(ttlCube);
+
+            const ttlDirCube = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial( { color: 0xf00000 } ));
+            ttlDirCube.scale.set(.25,.25,.75);
+            //ttlDirCube.parent = ttlCube
+            scene.add(ttlDirCube);
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+
+			camera.position.set(0,0,5);
+
+			function animate() {
+				requestAnimationFrame( animate );
+
+				// cube.rotation.x += 0.01;
+				// cube.rotation.y += 0.01;
+
+                if (ttl.x!=undefined) {
+
+                    controls.update();
+                    controls.target.set(ttl.x,ttl.y,ttl.z);
+                    ttlCube.position.set(ttl.x,ttl.y,ttl.z);
+                    ttlDirCube.position.set(
+                        ttl.x + (((ttl.dir==1)||(ttl.dir==3))?((ttl.dir==1)?+1:-1):0)*.25,
+                        ttl.y,
+                        ttl.z + (((ttl.dir==0)||(ttl.dir==2))?((ttl.dir==2)?+1:-1):0)*.25
+                    );
+                    ttlDirCube.rotation.set(0,ttl.dir*Math.PI/2,0);
+
+                    renderer.render( scene, camera );
+                }
+			};
+
+			animate();
+
+        }</script>
+
+        <script src="https://threejs.org/build/three.js"></script>
+        <script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
+
+        <!-- page to display when connected -->
+        <template id='page'>
+
+            <div style='display:flex; float:left'>
+                <div style="display:inline-block; border:2px; border-style:groove;">
+                    <button style='background-color:aqua; width:2em; height:1.5em; margin: 0;' onclick="left()">&lt;</button>
+                    <button style='background-color:aqua; width:2em; height:1.5em; margin: 0;' onclick="up()">^</button>
+                    <button style='background-color:aqua; width:2em; height:1.5em; margin: 0;' onclick="forward()">&#8226;</button>
+                    <button style='background-color:aqua; width:2em; height:1.5em; margin: 0;' onclick="down()">v</button>
+                    <button style='background-color:aqua; width:2em; height:1.5em; margin: 0;' onclick="right()">&gt;</button> 
+                    <br>
+                    <button style='background-color:brown; width:2em; height:1.5em;' onclick="digUp()">^</button>
+                    <br>
+                    <button style='background-color:brown; width:2em; height:1.5em;' onclick="digForward()">&#8226;</button>
+                    <br>
+                    <button style='background-color:brown; width:2em; height:1.5em;' onclick="digDown()">v</button>
+                </div>
+    
+                <div style="display:inline-block; border:2px; border-style:groove;">
+                    <label>top: </label><code id='topBlock'>loading...</code><br>
+                    <label>front: </label><code id='frontBlock'>loading...</code><br>
+                    <label>bottom: </label><code id='bottomBlock'>loading...</code><br>
+                    <label>pos: </label><code id='turtlePos'>loading...</code>
+                </div>
+
+                <br>
+                <div style='display: block; border: 2px; border-style:groove; position:relative;'>
+                    <textarea id='commandArea'></textarea>
+                    <button onclick="sendInputCommand()">send</button>
+                </div>
+            </div>
+
+            <!-- add the three.js thing and do the centring of camera -->
+
+
+    
+        </template>
+
+    
+        
+    </body>
+
+</html>
